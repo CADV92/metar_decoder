@@ -1,7 +1,7 @@
 """
 METAR Decoder Package
 
-Un decodificador completo de mensajes METAR (Meteorological Aerodrome Report) 
+Un decodificador completo de mensajes METAR (Meteorological Aerodrome Report)
 desarrollado para SENAMHI.
 
 Uso básico:
@@ -21,10 +21,11 @@ Clases principales disponibles:
 
 from importlib.metadata import PackageNotFoundError, version, metadata
 
-# Versión desde setuptools-scm (tags git). Fallback útil en editable installs.
+_DIST_NAME = "metar-decoder"
+
 try:
-    __version__ = version("metar_decoder")
-    _meta = metadata("metar_decoder")
+    __version__ = version(_DIST_NAME)
+    _meta = metadata(_DIST_NAME)
 except PackageNotFoundError:
     __version__ = "0.0.0"
     _meta = {}
@@ -32,18 +33,17 @@ except PackageNotFoundError:
 __author__ = _meta.get("Author", "Christian Dávila")
 __description__ = _meta.get("Summary", "Decodificador de mensajes METAR")
 
-# Importaciones principales para facilitar el uso
+# API pública de alto nivel
 from .decoder import MetarDecoder
 from .datatypes import Temperature, Wind, Pressure, Precipitation
 
-# Exportar también las clases de tipos de datos
 __all__ = [
-    'MetarDecoder',
-    'Temperature',
-    'Wind',
-    'Pressure',
-    'Precipitation',
-    '__version__',
-    '__author__',
-    '__description__'
+    "MetarDecoder",
+    "Temperature",
+    "Wind",
+    "Pressure",
+    "Precipitation",
+    "__version__",
+    "__author__",
+    "__description__",
 ]
