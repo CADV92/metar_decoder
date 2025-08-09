@@ -17,6 +17,7 @@ try:
 except Exception:
     Temperature = Wind = Pressure = Precipitation = tuple()
 
+from . import __version__
 
 # ------------------------ Utilidades JSON ------------------------ #
 
@@ -207,6 +208,7 @@ def format_output(decoder: MetarDecoder, format_type: str = "text") -> str:
 
 # Programa Principal
 def main():
+    print(f"metar_decoder {__version__}")
     parser = argparse.ArgumentParser(
         description="Decodificador de mensajes METAR (sin emoji)",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -19,9 +19,18 @@ Clases principales disponibles:
     - Precipitation: Clase para manejar datos de precipitación
 """
 
-__version__ = "0.1.0"
-__author__ = "Christian Dávila"
-__description__ = "Decodificador de mensajes METAR para datos meteorológicos aeronáuticos"
+from importlib.metadata import PackageNotFoundError, version, metadata
+
+# Versión desde setuptools-scm (tags git). Fallback útil en editable installs.
+try:
+    __version__ = version("metar_decoder")
+    _meta = metadata("metar_decoder")
+except PackageNotFoundError:
+    __version__ = "0.0.0"
+    _meta = {}
+
+__author__ = _meta.get("Author", "Christian Dávila")
+__description__ = _meta.get("Summary", "Decodificador de mensajes METAR")
 
 # Importaciones principales para facilitar el uso
 from .decoder import MetarDecoder
