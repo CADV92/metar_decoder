@@ -8,7 +8,7 @@ import argparse
 import sys
 import json
 import re
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any, List, Optional, Dict
 
 from metar_decoder import MetarDecoder
@@ -20,7 +20,6 @@ except Exception:
 from . import __version__
 
 # ------------------------ Utilidades JSON ------------------------ #
-
 def serialize_for_json(obj: Any) -> Any:
     if isinstance(obj, datetime) or getattr(obj, "isoformat", None) and not isinstance(obj, (str, bytes, bytearray)):
         try:
@@ -57,7 +56,6 @@ def serialize_for_json(obj: Any) -> Any:
         return obj
     return str(obj)
 
-
 def pick_json_payload(decoder: MetarDecoder, flat: bool) -> dict:
     if flat and hasattr(decoder, "to_flat_dict"):
         data = decoder.to_flat_dict()
@@ -68,9 +66,7 @@ def pick_json_payload(decoder: MetarDecoder, flat: bool) -> dict:
             data = getattr(decoder, "fields", {})
     return serialize_for_json(data)
 
-
 # ------------------------ Utilidades de formato texto ------------------------ #
-
 def _get(d: Dict, path: str, default=None):
     cur = d
     for p in path.split("."):
@@ -100,6 +96,16 @@ def _fmt_temp(v):
     # Fallback: deja el texto y añade °C una vez
     return s + " °C"
 
+def _fmt_report_time(tblock: dict) -> Optional[str]:
+    dt = tblock.get("datetime_utc")
+    if dt:
+        return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    # Fallback a lo que trae el METAR
+    ddhhmmZ = tblock.get("ddhhmmZ")
+    if ddhhmmZ:
+        d, h, m = ddhhmmZ[:2], ddhhmmZ[2:4], ddhhmmZ[4:6]
+        return f"Día: {d}; Time: {h}:{m}Z"
+    return None
 
 def format_text_output(decoder: MetarDecoder) -> str:
     if hasattr(decoder, "to_dict"):
@@ -107,96 +113,48 @@ def format_text_output(decoder: MetarDecoder) -> str:
     else:
         f = getattr(decoder, "fields", {})
 
+    COL = 16
+    def line(label, value):
+        lab = f"{label}:".ljust(COL)
+        return f"{lab} {value if value not in (None, '') else 'N/A'}"
+
+    # Extraer campos
+    raw_metar = _get(f, "metar.raw", _get(f, "raw_metar"))
+    station = _get(f, "station.icao")
+    dt = _get(f, "time.datetime_utc") or _fmt_report_time(_get(f, "time"))
+    t_air_s = _fmt_temp(_get(f, "temperature.air.celsius") or _get(f, "temperature.air") or _get(f, "air"))
+    t_dew_s = _fmt_temp(_get(f, "temperature.dew_point.celsius") or _get(f, "temperature.dew_point") or _get(f, "dew_point"))
+    tmin_s = _fmt_temp(_get(f, "temperature.min_24h_c") or _get(f, "temperature.extremos.tmin_c_custom") or _get(f, "tmin_c_custom") or _get(f, "temp_min_24h_c"))
+    tmax_s = _fmt_temp(_get(f, "temperature.max_24h_c") or _get(f, "temperature.extremos.tmax_c_custom") or _get(f, "tmax_c_custom") or _get(f, "temp_max_24h_c"))
+    wind_s = _get(f, "wind.description") or _get(f, "wind_desc")
+    gust_s = _get(f, "wind.gust")
+    vis_s = _get(f, "visibility.description") or _get(f, "visibility_desc")
+    pres_s = f"{_get(f, 'pressure.qnh_hpa') or _get(f, 'pressure.hPa') or _get(f, 'pressure')} hPa" if _get(f, "pressure.qnh_hpa") or _get(f, "pressure.hPa") or _get(f, "pressure") else None
+    clouds_s = _get(f, "clouds.summary") or _get(f, "cloud_summary") or _get(f, "clouds.condition") or _get(f, "cloud_condition")
+    wx_s = _get(f, "weather.summary") or _get(f, "present_weather_summary")
+    precip_s = _get(f, "precipitation.description")
+    noche_s = _get(f, "precipitation.noche")
+
+    # Construir salida
     out = []
-    out.append(">>> DECODIFICACIÓN METAR")
-    out.append("-" * 50)
-    raw_metar = _get(f, "metar.raw", _get(f, "raw_metar", "N/A"))
-    out.append(f"METAR: {raw_metar}")
-    out.append("-" * 50)
-
-    icao = _get(f, "station.icao")
-    if icao:
-        out.append(f"Estación: {icao}")
-
-    dt = _get(f, "time.datetime_utc") or _get(f, "datetime_utc")
-    if dt:
-        out.append(f"Hora UTC: {dt}")
-
-    wind_desc = _get(f, "wind.description") or _get(f, "wind_desc")
-    if wind_desc:
-        out.append(f"Viento: {wind_desc}")
-
-    vis_desc = _get(f, "visibility.description") or _get(f, "visibility_desc")
-    if vis_desc:
-        out.append(f"Visibilidad: {vis_desc}")
-
-    wx_summary = _get(f, "weather.summary") or _get(f, "present_weather_summary")
-    if wx_summary:
-        out.append(f"Tiempo presente: {wx_summary}")
-
-    # Nubes
-    print(_get(f, "clouds"))
-    clouds_summary = _get(f, "clouds.summary") or _get(f, "cloud_summary")
-    cloud_condition = _get(f, "clouds.condition") or _get(f, "cloud_condition")
-    if clouds_summary:
-        out.append(f"> Nubes: {clouds_summary}")
-    elif cloud_condition:
-        out.append(f"> Cielo: {cloud_condition}")
-
-    # Temperaturas 
-    t_air = _get(f, "temperature.air.celsius")
-    if t_air is None:
-        # Puede que venga como string o como dict plano
-        t_air = _get(f, "temperature.air") or _get(f, "air")
-
-    t_dew = _get(f, "temperature.dew_point.celsius")
-    if t_dew is None:
-        t_dew = _get(f, "temperature.dew_point") or _get(f, "dew_point")
-
-    if t_air is not None:
-        out.append(f"> Temperatura: {_fmt_temp(t_air)}")
-    if t_dew is not None:
-        out.append(f"> Punto de rocío: {_fmt_temp(t_dew)}")
-
-    # Humedad Relativa
-    rh = _get(f, "derived.humidity_rel_percent") or _get(f, "humidity_rel_percent")
-    if rh is not None:
-        try:
-            out.append(f"> Humedad: {float(rh):.0f}%")
-        except Exception:
-            out.append(f"> Humedad: {rh}%")
-
-    qnh = _get(f, "pressure.qnh_hpa") or _get(f, "pressure.hPa") or _get(f, "pressure")
-    if isinstance(qnh, (int, float)):
-        out.append(f"> Presión: {qnh} hPa")
-
-    precip_desc = _get(f, "precipitation.description")
-    precip_mm = _get(f, "precipitation.mm_custom") or _get(f, "precip_mm_custom")
-    precip_traza = _get(f, "precipitation.traza") or _get(f, "precip_traza")
-    if precip_desc:
-        out.append(f"> Precipitación: {precip_desc}")
-    elif precip_mm is not None:
-        out.append(f"> Precipitación: {precip_mm} mm")
-
-    tmax = (
-        _get(f, "temperature.max_24h_c")
-        or _get(f, "temperature.extremos.tmax_c_custom")
-        or _get(f, "tmax_c_custom")
-        or _get(f, "temp_max_24h_c")
-    )
-    tmin = (
-        _get(f, "temperature.min_24h_c")
-        or _get(f, "temperature.extremos.tmin_c_custom")
-        or _get(f, "tmin_c_custom")
-        or _get(f, "temp_min_24h_c")
-    )
-    if tmax is not None or tmin is not None:
-        partes = []
-        if tmax is not None:
-            partes.append(f"Máx {tmax:.1f} °C" if isinstance(tmax, (int, float)) else f"Máx {tmax} °C")
-        if tmin is not None:
-            partes.append(f"Mín {tmin:.1f} °C" if isinstance(tmin, (int, float)) else f"Mín {tmin} °C")
-        out.append("> Temp. Extremas: " + " / ".join(partes))
+    out.append("=" * 50)
+    out.append(line("Raw METAR", raw_metar))
+    out.append("=" * 50)
+    out.append(line("ICAO", station))
+    out.append(line("Reporte", str(dt) if dt else None))
+    out.append("")
+    out.append(line("Temperatura", t_air_s))
+    out.append(line("Punto de rocío", t_dew_s))
+    out.append(line("Temp. MÍN", tmin_s))
+    out.append(line("Temp. MÁX", tmax_s))
+    out.append(line("Viento", wind_s))
+    out.append(line("→ Ráfagas", gust_s))
+    out.append(line("Visibilidad", vis_s))
+    out.append(line("Presión", pres_s))
+    out.append(line("Cielo", clouds_s))
+    out.append(line("Tiempo presente", wx_s))
+    out.append(line("Precipitación", precip_s))
+    out.append(line("→ Noche", "Sí" if noche_s else "No" if noche_s is not None else None))
 
     return "\n".join(out)
 
@@ -208,7 +166,6 @@ def format_output(decoder: MetarDecoder, format_type: str = "text") -> str:
 
 # Programa Principal
 def main():
-    print(f"metar_decoder {__version__}")
     parser = argparse.ArgumentParser(
         description="Decodificador de mensajes METAR (sin emoji)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -236,6 +193,10 @@ Ejemplos de uso:
         action="store_true",
         help="Con --format json, exporta el JSON plano (to_flat_dict) si está disponible",
     )
+    parser.add_argument(
+        "--date", "-d",
+        help="Fecha de referencia UTC para completar año/mes del ddhhmmZ (formatos: 'YYYY-MM-DD' o 'YYYY-MM-DD HH:MM[:SS]')"
+    )
     parser.add_argument("--quiet", "-q", action="store_true", help="Solo mostrar errores")
     parser.add_argument("--version", action="version", version="metar_decoder 0.1.0")
 
@@ -261,7 +222,7 @@ Ejemplos de uso:
 
         for i, metar in enumerate(metars):
             try:
-                decoder = MetarDecoder(metar)
+                decoder = MetarDecoder(metar, ref_date=args.date)
 
                 if args.format == "json":
                     payload = pick_json_payload(decoder, flat=args.flat and hasattr(decoder, "to_flat_dict"))

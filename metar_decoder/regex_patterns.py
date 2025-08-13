@@ -23,7 +23,7 @@ METAR_REGEX = {
     "extreme_temps": re.compile(r"T(?P<tmax_sign>[01])(?P<tmax>\d{3})(?P<tmin_sign>[01])(?P<tmin>\d{3})"),
     
     # Extras personalizados
-    "pp_custom": re.compile(r'PP(\d+\.\d+|\d{3}|TRZ)', re.IGNORECASE),
+    "pp_custom": re.compile(r"\bPP\s*(?P<pp>(?:\d{1,4}(?:[.,]\d+)?|TRZ))\b", re.IGNORECASE),
     "tmax_custom": re.compile(r'TX\s*(\d{1,2}\.\d)'),
     "tmin_custom": re.compile(r'TN\s*(M)?\s*(\d{1,2}\.\d)'),
     "cloud": re.compile(
@@ -40,7 +40,10 @@ METAR_REGEX = {
 
     # Captura múltiples grupos meteorológicos del METAR
     "weather_multi": re.compile(
-        r"(?:(?:\+|-|VC)?(?:MI|PR|BC|DR|BL|SH|TS|FZ)?"
-        r"(?:DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS))"
+        r"(?<![A-Z])"
+        r"(?:\+|-|VC)?"
+        r"(?:MI|PR|BC|DR|BL|SH|TS|FZ)?"
+        r"(?:DZ|RA|SN|SG|IC|PL|GR|GS|UP|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS)"
+        r"(?![A-Z])"
     )
 }

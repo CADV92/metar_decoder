@@ -2,7 +2,7 @@ import re
 import math
 from datetime import datetime, UTC
 from collections import OrderedDict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from metar_decoder.regex_patterns import METAR_REGEX
 from metar_decoder.weather_utils import *
@@ -12,17 +12,51 @@ from metar_decoder.utils import (
 )
 
 class MetarDecoder:
-    def __init__(self, metar_string: str):
+    def __init__(self, metar_string: str, ref_date: Optional[Union[str, datetime]] = None):
         self.metar = metar_string
+        self.ref_time = self._coerce_ref_time(ref_date)
         self.fields = OrderedDict()
         self._init_schema()
         self.parse()
+    
+    def _coerce_ref_time(self, ref_date: Optional[Union[str, datetime]]) -> datetime:
+        if ref_date is None:
+            return None
+        if isinstance(ref_date, datetime):
+            return ref_date.astimezone(UTC) if ref_date.tzinfo else ref_date.replace(tzinfo=UTC)
+        if isinstance(ref_date, str):
+            for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
+                try:
+                    return datetime.strptime(ref_date, fmt).replace(tzinfo=UTC)
+                except ValueError:
+                    pass
+            try:
+                dt = datetime.fromisoformat(ref_date)
+                return dt.astimezone(UTC) if dt.tzinfo else dt.replace(tzinfo=UTC)
+            except Exception:
+                return None
+        return None
+
+    def _compose_obs_time(self, day: int, hour: int, minute: int) -> datetime:
+        if self.ref_time is None:
+            return None
+        y, m = self.ref_time.year, self.ref_time.month
+        try:
+            return datetime(y, m, day, hour, minute, tzinfo=UTC).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            pass
     
     # inicialización del esquema
     def _init_schema(self):
         self.fields["metar"] = {"raw": None}
         self.fields["station"] = {"icao": None}
-        self.fields["time"] = {"datetime_utc": None}
+        self.fields["time"] = {
+            "ddhhmmZ": None,
+            "day": None,
+            "hour": None,
+            "minute": None,
+            "datetime_utc": None
+        }
         self.fields["wind"] = {
             "raw": None,
             "direction_deg": None,
@@ -87,13 +121,15 @@ class MetarDecoder:
 
         # Fecha y hora UTC
         if match := METAR_REGEX["datetime"].search(self.metar):
-            dt_raw = match.group("datetime")
+            dt_raw = match.group("datetime")  # 'DDHHMMZ'
             day, hour, minute = int(dt_raw[:2]), int(dt_raw[2:4]), int(dt_raw[4:6])
-            today = datetime.now(UTC)
-            try:
-                obs_time = today.replace(day=day, hour=hour, minute=minute, second=0, microsecond=0)
-            except ValueError:
-                obs_time = None
+
+            self.fields["time"]["ddhhmmZ"] = dt_raw
+            self.fields["time"]["day"] = day
+            self.fields["time"]["hour"] = hour
+            self.fields["time"]["minute"] = minute
+
+            obs_time = self._compose_obs_time(day, hour, minute)
             self.fields["time"]["datetime_utc"] = obs_time
 
         # Viento (usando clase Wind)
@@ -190,15 +226,33 @@ class MetarDecoder:
 
         # Precipitación PP
         if match := METAR_REGEX["pp_custom"].search(self.metar):
+            token = match.group(0)
             val = match.group(1).upper()
+            
+            mm = None
+            traza = False
+            desc = None
+            
             if val == "TRZ":
-                self.fields["precipitation"]["mm_custom"] = 0.0
-                self.fields["precipitation"]["traza"] = True
-                self.fields["precipitation"]["description"] = "traza (<0.1 mm)"
+                mm = 0.0
+                traza = True
+                desc = "traza (<0.1 mm)"
             else:
-                self.fields["precipitation"]["mm_custom"] = float(val) if "." in val else int(val) / 10
-        if "NOCHE" in self.metar.upper():
-            self.fields["precipitation"]["noche"] = True
+                if "." in val:
+                    mm = float(val)
+                else:
+                    mm = int(val) / 10.0
+                desc = f"{mm:.1f} mm"
+
+            if "NOCHE" in self.metar.upper():
+                self.fields["precipitation"]["noche"] = True
+        
+            self.fields["precipitation"].update({
+                "raw": token.replace(" ", ""), 
+                "mm_custom": mm,
+                "traza": traza,
+                "description": desc,
+            })
 
         # Temperatura máxima TX
         extremos_extra = extraer_temperaturas_extremas(self.metar)
